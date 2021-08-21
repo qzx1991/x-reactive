@@ -1,0 +1,24 @@
+{
+  "name": "vite-project",
+  "version": "0.0.0",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc && vite build",
+    "serve": "vite preview"
+  },
+  "dependencies": {
+    "@babel/plugin-syntax-jsx": "^7.14.5",
+    "@types/lodash": "^4.14.172",
+    "@types/node": "^16.6.2",
+    "html-tags": "^3.1.0",
+    "lodash": "^4.17.21",
+    "qzx-ioc": "^1.1.95",
+    "svg-tags": "^1.0.0",
+    "tslib": "^2.3.1",
+    "vite-plugin-ts": "^1.1.7"
+  },
+  "devDependencies": {
+    "typescript": "^4.3.2",
+    "vite": "^2.4.4"
+  }
+}
