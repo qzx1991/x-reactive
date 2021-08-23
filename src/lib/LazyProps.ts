@@ -7,7 +7,7 @@
  */
 import { result } from 'lodash';
 import { Raw, Lazyable } from './Lazyable';
-import { IFunctionalValue, IJSXProperty } from './Lazyman';
+import { IFunctionalValue, IJSXProperty } from './types';
 import LazyTask from './LazyTask';
 import { renderChildren } from './helper';
 export default class LazyProp {

@@ -1,8 +1,6 @@
 import Lazyman from './lib';
-import { Lazyable } from './lib/Lazyable';
 import { useCtx } from './lib/VirtualElement';
 Lazyman.driveDom();
-const data = Lazyable({ count: 1 });
 Lazyman.render(<Test />, 'app');
 
 function Test(
@@ -10,6 +8,14 @@ function Test(
     ctx = useCtx({
         state: {
             count: 1,
+        },
+        lifeCycle: {
+            beforeCreate() {
+                console.log('before');
+            },
+            onCreated() {
+                console.log('created');
+            },
         },
     })
 ) {

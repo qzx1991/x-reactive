@@ -1,17 +1,18 @@
 import LazyDocument from './Document';
 import {
-    Arrayable,
     FormattedILazyResult,
     IDomElement,
     IDomPosition,
     ILazyResult,
     ITextElement,
-} from './Lazyman';
+} from './types';
 import VirtualElement from './VirtualElement';
-import { IFunctionalValue, ArrayableOnlyArray } from './Lazyman';
+import { IFunctionalValue, ArrayableOnlyArray } from './types';
 import LazyTask from './LazyTask';
 
-const CHILDREN_RESULT_FLAG = Symbol('CHILDREN_RESULT_FLAG');
+export const CHILDREN_RESULT_FLAG = Symbol('CHILDREN_RESULT_FLAG');
+export const FOR_RESULT_FLAG = Symbol('FOR_RESULT_FLAG');
+export const SPECIAL_ARRAY_LIST = [CHILDREN_RESULT_FLAG, FOR_RESULT_FLAG];
 
 /**
  * 更新的任务集中处理，避免没必要的重复渲染
@@ -34,16 +35,18 @@ export function reWriteUpdate(task: LazyTask, onUpdate?: () => void) {
     };
     const forceUpdate = task.forceUpdate;
     task.forceUpdate = function () {
-        forceUpdate.apply(this);
-        onUpdate?.();
-        global_next_ticks.forEach((h) => h());
-        global_next_ticks = [];
+        if (forceUpdate.apply(this)) {
+            onUpdate?.();
+            global_next_ticks.forEach((h) => h());
+            global_next_ticks = [];
+            return true;
+        }
+        return false;
     };
 }
 
 export function runLifeCycle() {
     LazyDocument.requestAnimationFrame(() => {
-        console.log(1234);
         if (NEXTTICKS_SET.size > 0) {
             NEXTTICKS_SET.forEach((t) => t.forceUpdate());
             NEXTTICKS_SET.clear();
@@ -59,7 +62,7 @@ export function runLifeCycle() {
  */
 
 export function formatResult(result: ILazyResult): FormattedILazyResult {
-    if (isChildrenResult(result)) {
+    if (isSpecialArray(result)) {
         return result as FormattedILazyResult;
     } else if (result instanceof VirtualElement) {
         return result;
@@ -78,7 +81,7 @@ export function formatResult(result: ILazyResult): FormattedILazyResult {
 export function renderResult(
     result: FormattedILazyResult
 ): FormattedILazyResult {
-    if (isChildrenResult(result)) {
+    if (isSpecialArray(result)) {
         (result as ArrayableOnlyArray<ITextElement | VirtualElement>).forEach(
             (r) => renderResult(r)
         );
@@ -92,7 +95,7 @@ export function appendResults(
     result: FormattedILazyResult,
     target: IDomElement
 ) {
-    if (isChildrenResult(result)) {
+    if (isSpecialArray(result)) {
         (result as ArrayableOnlyArray<ITextElement | VirtualElement>).forEach(
             (i) => appendResults(i, target)
         );
@@ -107,7 +110,7 @@ export function insertIntoResults(
     result: FormattedILazyResult,
     position: IDomPosition
 ) {
-    if (isChildrenResult(result)) {
+    if (isSpecialArray(result)) {
         (result as ArrayableOnlyArray<ITextElement | VirtualElement>).forEach(
             (i) => insertIntoResults(i, position)
         );
@@ -202,6 +205,8 @@ export function renderChildren(children: IFunctionalValue[]) {
     };
 }
 
-export function isChildrenResult<T>(data: T) {
-    return Array.isArray(data) && (data as any)[CHILDREN_RESULT_FLAG];
+export function isSpecialArray<T>(data: T) {
+    return (
+        Array.isArray(data) && SPECIAL_ARRAY_LIST.some((s) => (data as any)[s])
+    );
 }

@@ -1,4 +1,4 @@
-import { Arrayable, ArrayableOnlyArray, Flattern } from './Lazyman';
+import { Arrayable, ArrayableOnlyArray, Flattern } from './types';
 import { isLazyabledData, Lazyable } from './Lazyable';
 import LazyTask from './LazyTask';
 
@@ -77,4 +77,17 @@ export function pick<T extends Record<string, any>, K extends keyof T>(
         }
         return result;
     }
+}
+
+export function someOfMap<K, V>(
+    data: Map<K, V>,
+    some: (k: K, v: V) => boolean
+) {
+    const entries = data.entries();
+    for (let [key, value] of entries) {
+        if (some(key, value)) {
+            return true;
+        }
+    }
+    return false;
 }

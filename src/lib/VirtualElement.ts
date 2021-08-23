@@ -6,7 +6,7 @@ import {
     IFunctionalValue,
     IJSXProperty,
     VoidOrVoidFunction,
-} from './Lazyman';
+} from './types';
 import LazyTask from './LazyTask';
 import LazyProp from './LazyProps';
 import { Lazyable, onLazyable, Raw } from './Lazyable';
@@ -20,7 +20,7 @@ import {
     reWriteUpdate,
 } from './helper';
 import LazyDocument from './Document';
-import { IDomPosition } from './Lazyman';
+import { IDomPosition } from './types';
 import { renderChildren, renderResult } from './helper';
 
 let TEMP_ELEMENT: VirtualElement | undefined = undefined;
@@ -37,9 +37,9 @@ export default class VirtualElement {
     mainProp?: LazyProp;
     ctx?: FunctionContextType<any, any, any, any>;
     onCreated: (() => VoidOrVoidFunction)[] = [];
+    beforeCreate: (() => VoidOrVoidFunction)[] = [];
     onMounted: (() => VoidOrVoidFunction)[] = [];
     onUnMounted: VoidFunction[] = [];
-    nextticks: (() => void)[] = [];
     // 函数组件的结果
     renderResult?: FormattedILazyResult;
     nativeElement?: IDomElement;
@@ -139,12 +139,7 @@ export default class VirtualElement {
             },
             {
                 onInit: (task) => {
-                    reWriteUpdate(task, () => {
-                        this.nextticks.forEach(
-                            (n) => typeof n === 'function' && n()
-                        );
-                        this.nextticks = [];
-                    });
+                    reWriteUpdate(task);
                 },
             }
         );
@@ -228,21 +223,35 @@ export function useCtx<
     T extends Record<string, any>,
     C extends Record<string, (...args: any[]) => any>,
     S extends Record<string, new (...args: any[]) => any>,
-    M extends Record<string, (...args: any[]) => any>
+    M extends Record<string, (...args: any[]) => any>,
+    D extends Record<string, any>
 >(
-    option: FunctionalComponentConfig<T, C, S, M>
-): FunctionContextType<T, C, S, M> {
+    option: FunctionalComponentConfig<T, C, S, M> & D
+): FunctionContextType<T, C, S, M> & D {
     if (!TEMP_ELEMENT) throw new Error('you are not in a VirtualElement!');
+    const { state, lifeCycle, inject, methods, computed, ...rest } = option;
     const ctx: any = {
         state: option.state ? Lazyable(option.state) : undefined,
         inject: {},
-        nextTick: (h: () => void) => TEMP_ELEMENT?.nextticks.push(h),
+        ...rest,
     };
     TEMP_ELEMENT.ctx = ctx;
     // 处理下生命周期函数
     if (option.lifeCycle) {
         for (let life in option.lifeCycle) {
             switch (life) {
+                case 'beforeCreate':
+                    TEMP_ELEMENT.beforeCreate.push(
+                        option.lifeCycle[life]!.bind(ctx)
+                    );
+                    TEMP_ELEMENT.beforeCreate
+                        .map((v) => v())
+                        .forEach((i) =>
+                            typeof i === 'function'
+                                ? TEMP_ELEMENT?.onUnMounted.push(i)
+                                : null
+                        );
+                    break;
                 case 'onCreated':
                     TEMP_ELEMENT.onCreated.push(
                         option.lifeCycle[life]!.bind(ctx)
@@ -302,7 +311,6 @@ export type FunctionContextType<T, C, S, M> = M & {
     state: T;
     computed: ComputedType<C>;
     inject: ServiceType<S>;
-    nexttick: () => void;
 };
 export type FunctionalComponentConfig<T, C, S, M> = {
     state?: T;
@@ -312,6 +320,7 @@ export type FunctionalComponentConfig<T, C, S, M> = {
     methods?: M & ThisType<FunctionContextType<T, C, S, M>>;
 };
 export type ComponentLifeCycle = {
+    beforeCreate?: () => VoidOrVoidFunction;
     onCreated?: () => VoidOrVoidFunction;
     onMounted?: () => VoidOrVoidFunction;
     onUnMounted?: VoidFunction;

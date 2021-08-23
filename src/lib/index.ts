@@ -14,8 +14,8 @@ import {
     IDocument,
     ILazyResult,
     IDomElement,
-} from './Lazyman';
-export * from './Lazyman';
+} from './types';
+export * from './types';
 const Lazyman = {
     /**
      * 创建虚拟节点 这是JSX

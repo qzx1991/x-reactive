@@ -1,11 +1,12 @@
 import { LazyableOptType, onLazyable } from './Lazyable';
+import { someOfMap } from './util';
 export interface ILazyTaskContext<T = any> {
     time: number;
     reasons?: TaskChangeReason[];
     addSubTask: (task?: LazyTask) => void;
     stop: () => void;
-    setData?: (data: T) => void;
-    getData?: () => T | undefined;
+    setData: (data: T) => void;
+    getData: () => T | undefined;
 }
 
 // 当前正在运行的任务
@@ -113,7 +114,7 @@ export default class LazyTask<T = any> {
 
     constructor(
         private handler: (
-            ctx?: ILazyTaskContext<T>
+            ctx: ILazyTaskContext<T>
         ) => VoidFunction | undefined | void,
         private option: {
             autoAppendParent?: boolean;
@@ -122,6 +123,7 @@ export default class LazyTask<T = any> {
             onStopped?: () => void;
             data?: T;
             onInit?: (ins: LazyTask) => void;
+            shouldUpdate?: (reasons: TaskChangeReason[]) => boolean;
         } = {}
     ) {
         if (this.option.data) {
@@ -158,14 +160,49 @@ export default class LazyTask<T = any> {
         }
         this.reasons.push(reason);
     }
-    forceUpdate() {
-        if (this.hasStopped) return;
+    private shouldUpdate() {
+        if (this.option.shouldUpdate && typeof this.option.shouldUpdate) {
+            return this.option.shouldUpdate(this.reasons || []);
+        }
+        const data = new Map<
+            any,
+            Map<string | number, { oldValue: any; newValue: any }>
+        >();
+        this.reasons?.forEach((reason) => {
+            if (!data.get(reason.target)) {
+                data.set(reason.target, new Map());
+            }
+            const keyMap = data.get(reason.target)!;
+            if (!keyMap?.has(reason.key)) {
+                keyMap?.set(reason.key, {
+                    oldValue: reason.oldValue,
+                    newValue: reason.value,
+                });
+            } else {
+                const data = keyMap.get(reason.key)!;
+                data.newValue = reason.value;
+            }
+        });
+        // 但凡存在新值、旧值不等的情况，都需要更新 否则不更新
+        return someOfMap(data, (k, v) =>
+            someOfMap(v, (key, d) => {
+                return d.newValue !== d.oldValue;
+            })
+        );
+    }
+
+    forceUpdate(): boolean {
+        // 如果已经停止了 那就不能更新了
+        if (this.hasStopped) return false;
+        // 不过条件不允许更新  那也是不能更新的
+        if (!this.shouldUpdate()) return false;
         this.unsub?.();
         this.run();
         delete this.reasons;
+        return true;
     }
     update() {
-        return this.forceUpdate();
+        this.forceUpdate();
     }
     stop() {
         // 移除所有的子任务

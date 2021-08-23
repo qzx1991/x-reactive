@@ -1,4 +1,4 @@
-import { IDocument, IDomElement, IDomPosition } from './Lazyman';
+import { IDocument, IDomElement, IDomPosition } from './types';
 
 class DocumentStruct implements IDocument {
     isTextElement(d: any) {
