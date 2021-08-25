@@ -4,26 +4,28 @@ import {
     IDomElement,
     IDomPosition,
     ILazyResult,
+    IFunctionalValue,
+    ArrayableOnlyArray,
     ITextElement,
 } from './types';
 import VirtualElement from './VirtualElement';
-import { IFunctionalValue, ArrayableOnlyArray } from './types';
 import LazyTask from './LazyTask';
 
 export const CHILDREN_RESULT_FLAG = Symbol('CHILDREN_RESULT_FLAG');
 export const FOR_RESULT_FLAG = Symbol('FOR_RESULT_FLAG');
+export const EMPTY_ARRAY_PLACEHOLD = Symbol('EMPTY_ARRAY_PLACEHOLD');
 export const SPECIAL_ARRAY_LIST = [CHILDREN_RESULT_FLAG, FOR_RESULT_FLAG];
 
 /**
  * 更新的任务集中处理，避免没必要的重复渲染
  * 放在这里是为了与LazyTask解耦 layzTask是个独立的模块
  */
-const NEXTTICKS_SET = new Set<LazyTask>();
-function addToNextTick(task: LazyTask) {
-    if (NEXTTICKS_SET.size === 0) {
+const UPDATE_POOL_SET = new Set<LazyTask>();
+function addToUpldatePool(task: LazyTask) {
+    if (UPDATE_POOL_SET.size === 0) {
         runLifeCycle();
     }
-    NEXTTICKS_SET.add(task);
+    UPDATE_POOL_SET.add(task);
 }
 let global_next_ticks: (() => void)[] = [];
 export function nextTick(h: () => void) {
@@ -31,14 +33,12 @@ export function nextTick(h: () => void) {
 }
 export function reWriteUpdate(task: LazyTask, onUpdate?: () => void) {
     task.update = function () {
-        addToNextTick(task);
+        addToUpldatePool(task);
     };
     const forceUpdate = task.forceUpdate;
     task.forceUpdate = function () {
         if (forceUpdate.apply(this)) {
             onUpdate?.();
-            global_next_ticks.forEach((h) => h());
-            global_next_ticks = [];
             return true;
         }
         return false;
@@ -47,10 +47,10 @@ export function reWriteUpdate(task: LazyTask, onUpdate?: () => void) {
 
 export function runLifeCycle() {
     LazyDocument.requestAnimationFrame(() => {
-        if (NEXTTICKS_SET.size > 0) {
-            NEXTTICKS_SET.forEach((t) => t.forceUpdate());
-            NEXTTICKS_SET.clear();
-        }
+        UPDATE_POOL_SET.forEach((t) => t.forceUpdate());
+        UPDATE_POOL_SET.clear();
+        global_next_ticks.forEach((h) => h());
+        global_next_ticks = [];
     });
 }
 
@@ -63,9 +63,22 @@ export function runLifeCycle() {
 
 export function formatResult(result: ILazyResult): FormattedILazyResult {
     if (isSpecialArray(result)) {
+        // 空数组的时候 返回一个空字符
+        if ((result as ILazyResult[]).length === 0) {
+            const placeholder =
+                (result as any)[EMPTY_ARRAY_PLACEHOLD] ||
+                LazyDocument.createTextElement('');
+            if (!(result as any)[EMPTY_ARRAY_PLACEHOLD]) {
+                (result as any)[EMPTY_ARRAY_PLACEHOLD] = placeholder;
+            }
+            return placeholder;
+        }
         return result as FormattedILazyResult;
-    } else if (result instanceof VirtualElement) {
-        return result;
+    } else if (
+        result instanceof VirtualElement ||
+        LazyDocument.isTextElement(result)
+    ) {
+        return result as VirtualElement | ITextElement;
     } else if (typeof result === 'string') {
         return LazyDocument.createTextElement(result);
     }
@@ -106,6 +119,49 @@ export function appendResults(
     }
 }
 
+export function getPlaceHolder(result: FormattedILazyResult) {
+    if (
+        isSpecialArray(result) &&
+        (result as FormattedILazyResult[]).length === 0
+    ) {
+        return (result as any)[EMPTY_ARRAY_PLACEHOLD] as
+            | ITextElement
+            | undefined;
+    }
+    return undefined;
+}
+
+export function getPosition(
+    result: FormattedILazyResult,
+    after = true
+): IDomPosition {
+    if (isSpecialArray(result)) {
+        const r = result as FormattedILazyResult[];
+        const placeholder = getPlaceHolder(r);
+        // 表示存在占位符
+        if (placeholder) {
+            return getPosition(placeholder, after);
+        } else {
+            // 是一个大于0的数组
+            const item = after ? r[r.length - 1] : r[0];
+            return getPosition(item, after);
+        }
+    } else if (result instanceof VirtualElement) {
+        return result.getPosition(after);
+    } else {
+        const r = result as IDomElement;
+        return after
+            ? {
+                  nextSibling: r.nextSibling,
+                  parent: r.parent,
+              }
+            : {
+                  nextSibling: r,
+                  parent: r.parent,
+              };
+    }
+}
+
 export function insertIntoResults(
     result: FormattedILazyResult,
     position: IDomPosition
@@ -130,9 +186,10 @@ export function insertIntoResults(
  * @returns
  */
 export function diffResult(
-    oldResult: FormattedILazyResult,
+    oldResult: FormattedILazyResult | undefined,
     newResult: FormattedILazyResult
 ) {
+    if (!oldResult) return renderResult(newResult);
     // 是同一种组件
     if (
         oldResult instanceof VirtualElement &&
@@ -159,7 +216,6 @@ export function unmountResult(result: FormattedILazyResult): IDomPosition {
         const dom = result as IDomElement;
         const position: IDomPosition = {
             parent: dom.parent,
-            preSibling: dom.preSibling,
             nextSibling: dom.nextSibling,
         };
         dom.remove();
@@ -204,7 +260,11 @@ export function renderChildren(children: IFunctionalValue[]) {
         result: childrenResult,
     };
 }
-
+/**
+ * 判断是不是特殊的数组 是的话 就不JSON化
+ * @param data
+ * @returns
+ */
 export function isSpecialArray<T>(data: T) {
     return (
         Array.isArray(data) && SPECIAL_ARRAY_LIST.some((s) => (data as any)[s])

@@ -5,7 +5,6 @@ class DocumentStruct implements IDocument {
         return undefined as any;
     }
     createTextElement(t: string) {
-        console.log(999);
         return undefined as any;
     }
     createElement(t: string) {
@@ -20,9 +19,7 @@ class DocumentStruct implements IDocument {
     insertBefore(doms: IDomElement[], target: IDomElement) {
         return null;
     }
-    requestAnimationFrame(h: () => void) {
-        console.log(444);
-    }
+    requestAnimationFrame(h: () => void) {}
 }
 
 const LazyDocument = new DocumentStruct();

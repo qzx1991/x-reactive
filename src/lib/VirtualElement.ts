@@ -18,10 +18,11 @@ import {
     unmountResult,
     insertIntoResults,
     reWriteUpdate,
+    renderChildren,
+    getPosition,
 } from './helper';
 import LazyDocument from './Document';
 import { IDomPosition } from './types';
-import { renderChildren, renderResult } from './helper';
 
 let TEMP_ELEMENT: VirtualElement | undefined = undefined;
 // 添加依赖注入的全局处理逻辑
@@ -35,7 +36,7 @@ export default class VirtualElement {
     // 普通组件的孩子节点
     childrenResult: FormattedILazyResult[] = [];
     mainProp?: LazyProp;
-    ctx?: FunctionContextType<any, any, any, any>;
+    ctx?: FunctionContextType<any, any, any, any, any>;
     onCreated: (() => VoidOrVoidFunction)[] = [];
     beforeCreate: (() => VoidOrVoidFunction)[] = [];
     onMounted: (() => VoidOrVoidFunction)[] = [];
@@ -69,6 +70,17 @@ export default class VirtualElement {
             .forEach((i) =>
                 typeof i === 'function' ? this.onUnMounted.push(i) : null
             );
+    }
+
+    getPosition(after = true): IDomPosition {
+        if (this.isComponent) {
+            return getPosition(this.renderResult!, after);
+        } else if (this.isNative && this.nativeElement) {
+            return getPosition(this.nativeElement, after);
+        } else if (this.isFragment) {
+            return getPosition(this.childrenResult, after);
+        }
+        throw new Error('not a valid component');
     }
 
     insertInto(position: IDomPosition) {
@@ -113,18 +125,12 @@ export default class VirtualElement {
                 const ORIGIN = TEMP_ELEMENT;
                 TEMP_ELEMENT = this;
                 // 计算渲染结果
-                const result = renderResult(
-                    formatResult(
-                        tag(prop, ctx?.time === 1 ? undefined : this.ctx)
-                    )
+                const result = formatResult(
+                    tag(prop, ctx?.time === 1 ? undefined : this.ctx)
                 );
 
                 // 若存在就结果 处理旧结果
-                if (this.renderResult) {
-                    this.renderResult = diffResult(this.renderResult, result);
-                } else {
-                    this.renderResult = result;
-                }
+                this.renderResult = diffResult(this.renderResult, result);
 
                 if (ctx?.time === 1) {
                     this.onCreated
@@ -204,7 +210,13 @@ export default class VirtualElement {
         // 停止主任务 子任务也自动停止
         this.mainTask?.stop();
         // 卸载子组件
-        const result = unmountResult(this.renderResult!);
+        const result = unmountResult(
+            this.isNative
+                ? this.nativeElement!
+                : this.isFragment
+                ? this.childrenResult
+                : this.renderResult!
+        );
         // 调用钩子函数
         this.onUnMounted.forEach((i) => i());
         return result;
@@ -226,8 +238,8 @@ export function useCtx<
     M extends Record<string, (...args: any[]) => any>,
     D extends Record<string, any>
 >(
-    option: FunctionalComponentConfig<T, C, S, M> & D
-): FunctionContextType<T, C, S, M> & D {
+    option: FunctionalComponentConfig<T, C, S, M, D> & D
+): FunctionContextType<T, C, S, M, D> {
     if (!TEMP_ELEMENT) throw new Error('you are not in a VirtualElement!');
     const { state, lifeCycle, inject, methods, computed, ...rest } = option;
     const ctx: any = {
@@ -307,17 +319,18 @@ export function useCtx<
     }
     return ctx as any;
 }
-export type FunctionContextType<T, C, S, M> = M & {
+export type FunctionContextType<T, C, S, M, D> = M & {
     state: T;
     computed: ComputedType<C>;
     inject: ServiceType<S>;
-};
-export type FunctionalComponentConfig<T, C, S, M> = {
+} & D;
+export type FunctionalComponentConfig<T, C, S, M, D> = {
     state?: T;
-    computed?: C & ThisType<FunctionContextType<T, C, S, M>>;
-    inject?: S & ThisType<FunctionContextType<T, C, S, M>>;
-    lifeCycle?: ComponentLifeCycle & ThisType<FunctionContextType<T, C, S, M>>;
-    methods?: M & ThisType<FunctionContextType<T, C, S, M>>;
+    computed?: C & ThisType<FunctionContextType<T, C, S, M, D>>;
+    inject?: S & ThisType<FunctionContextType<T, C, S, M, D>>;
+    lifeCycle?: ComponentLifeCycle &
+        ThisType<FunctionContextType<T, C, S, M, D>>;
+    methods?: M & ThisType<FunctionContextType<T, C, S, M, D>>;
 };
 export type ComponentLifeCycle = {
     beforeCreate?: () => VoidOrVoidFunction;

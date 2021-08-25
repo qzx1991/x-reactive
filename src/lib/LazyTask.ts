@@ -17,6 +17,12 @@ export function getTempTask() {
     return TEMP_RUNNING_TASK;
 }
 
+export function runWithoutRely(handler: () => void) {
+    const origin = TEMP_RUNNING_TASK;
+    handler();
+    TEMP_RUNNING_TASK = origin;
+}
+
 export type TaskChangeReason = {
     target: any; // 导致变化的对象
     key: any; // 导致变化的key

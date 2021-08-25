@@ -8,7 +8,6 @@ export type VoidOrVoidFunction = void | VoidFunction;
 export interface IDomPosition {
     parent?: IDomElement;
     nextSibling?: IDomElement;
-    preSibling?: IDomElement;
 }
 
 // createElement创建的一个虚拟组件
