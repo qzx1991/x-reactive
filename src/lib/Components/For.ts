@@ -1,54 +1,32 @@
-import { ILazyResult, VoidOrVoidFunction } from '../types';
+import { ILazyResult } from '../types';
 import { useCtx } from '../VirtualElement';
-import LazyTask from '../LazyTask';
-import { Lazyable } from '../Lazyable';
+import { FOR_RESULT_FLAG, formatResult } from '../helper';
 
 /**
  * 列表展示的方案
  * 不直接使用map等，避免复杂的逻辑和计算
  * @param props
  */
-export function For<T = any>(
-    props: { data: T[]; render: () => ILazyResult },
-    ctx = useCtx({
-        result: [] as ILazyResult[],
-        lifeCycle: {
-            beforeCreate() {
-                const tasksMap = new Map<number, ArrayItemTaskData<T>>();
-                const task = new LazyTask((o) => {
-                    if (o.time !== 1) {
-                        // 说明data更新了 我们要销毁旧数据
-                    }
-                    for (let i = 0; i < props.data.length; i++) {
-                        const item = new ArrayItemTaskData<T>();
-                        item.updateTask(
-                            new LazyTask(() => {
-                                item.data.value = props.data[i];
-                            })
-                        );
-                        tasksMap.set(i, item);
-                    }
-                });
-                return () => {
-                    task.stop();
-                    tasksMap.forEach((t) => t.stop());
-                };
-            },
-        },
-    })
-) {
-    return ctx.result;
-}
-
-export class ArrayItemTaskData<T> {
-    private task?: LazyTask;
-    data = Lazyable({ value: undefined as T | undefined });
-    constructor() {}
-    updateTask(task: LazyTask) {
-        this.stop();
-        this.task = task;
-    }
-    stop() {
-        return this.task?.stop();
-    }
+export function For<T = any>(props: {
+    data: T[];
+    key: keyof T | ((item: T, index: number) => any);
+    render: (item: T, index: number) => ILazyResult;
+}) {
+    return props.data.length === 0
+        ? ''
+        : new Proxy(
+              props.data.map((item, index) => ({
+                  key:
+                      typeof props.key === 'function'
+                          ? props.key(item, index)
+                          : item?.[props.key],
+                  result: formatResult(props.render(item, index)),
+              })),
+              {
+                  get(t, k, r) {
+                      if (k === FOR_RESULT_FLAG) return true;
+                      return Reflect.get(t, k, r);
+                  },
+              }
+          );
 }

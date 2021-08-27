@@ -46,7 +46,7 @@ const Lazyman = {
     },
     // 渲染组件到指定的节点上 这是起点
     render(element: ILazyResult, dom: string | IDomElement) {
-        const target =
+        let target =
             typeof dom === 'string' ? LazyDocument.querySelect(`#${dom}`) : dom;
         if (!target) throw new Error('target dom not exists!');
         appendResults(renderResult(formatResult(element)), target);

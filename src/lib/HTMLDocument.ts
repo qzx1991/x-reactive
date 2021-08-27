@@ -99,6 +99,7 @@ class MyBaseElement implements IDomElement {
             }
             switch (attr) {
                 case 'className':
+                    (this.dom as HTMLElement).setAttribute('class', value);
                     break;
                 case 'style':
                     break;
@@ -124,7 +125,13 @@ class MyBaseElement implements IDomElement {
         }
     }
     remove() {
-        return this.dom.remove();
+        this.dom.remove();
+        // (this.dom as any) = null;
+        const position = {
+            parent: this.parent,
+            nextSibling: this.nextSibling,
+        };
+        return position;
     }
     // 清空子节点
     clear() {

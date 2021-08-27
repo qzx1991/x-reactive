@@ -54,7 +54,7 @@ function transformJSXElement(t, path) {
   const attributes = openingElement.attributes;
   const isNativeTag = htmlTags.includes(tagName) || svgTags.includes(tagName);
   const tag = isNativeTag ? t.stringLiteral(tagName) : t.identifier(tagName);
-  const { key, attrs } = getAttribute(t, attributes);
+  const attrs = getAttribute(t, attributes);
   return t.callExpression(t.identifier("Lazyman.createElement"), [
     t.numericLiteral(++id),
     tag,
@@ -64,20 +64,10 @@ function transformJSXElement(t, path) {
 }
 
 function getAttribute(t, attributes) {
-  let key = undefined;
-  const attrs = t.arrayExpression(
+  return t.arrayExpression(
     attributes
       .map((attribute) => {
         if (attribute.type === "JSXAttribute") {
-          if (attribute.name.name === "key") {
-            // key也是一个functional的函数
-            key = t.arrowFunctionExpression(
-              [],
-              attribute.value.expression,
-              false
-            );
-            return null;
-          }
           return t.objectExpression([
             t.objectProperty(
               t.stringLiteral("type"),
@@ -89,7 +79,7 @@ function getAttribute(t, attributes) {
             ),
             t.objectProperty(
               t.stringLiteral("value"),
-              t.arrowFunctionExpression([], attribute.value.expression, false)
+              t.arrowFunctionExpression([], attribute.value.type === 'StringLiteral' ? attribute.value : attribute.value.expression, false)
             ),
           ]);
         } else if (attribute.type === "JSXSpreadAttribute") {
@@ -105,10 +95,6 @@ function getAttribute(t, attributes) {
       })
       .filter((i) => i)
   );
-  return {
-    key,
-    attrs,
-  };
 }
 
 function getChildren(t, children) {

@@ -16,7 +16,10 @@ export default class LazyProp {
     private mainTask?: LazyTask<Map<number, Record<string, any>>>;
     private MyProp: Record<string, any> = Lazyable({});
 
-    private propertyPositions = new Map<string, number[]>();
+    private propertyPositions: Map<string, number[]> = new Map<
+        string,
+        number[]
+    >();
 
     private init() {
         this.mainTask = new LazyTask(
@@ -25,7 +28,7 @@ export default class LazyProp {
                     this.propertyPositions.set('children', [-1]);
                 }
                 for (let i = 0; i < this.props.length; i++) {
-                    const prop = this.props[i];
+                    let prop: IJSXProperty | null = this.props[i];
                     if (prop.type === 'normal') {
                         if (!this.propertyPositions.has(prop.name)) {
                             this.propertyPositions.set(prop.name, []);
@@ -36,10 +39,12 @@ export default class LazyProp {
                         o?.addSubTask(
                             new LazyTask(
                                 (so) => {
+                                    let prop: IJSXProperty | null =
+                                        this.props[i];
                                     // 第一次执行 记录下rest的值，同时记录所有的属性
                                     // 记录属性的位置
                                     if (so?.time === 1) {
-                                        const restData = prop.value();
+                                        let restData = prop.value();
                                         // 存下数据 在需要的时候用到
                                         o?.getData?.()?.set(i, restData);
                                         for (let property in restData) {
@@ -59,6 +64,7 @@ export default class LazyProp {
                                                 .get(property)
                                                 ?.push(i);
                                         }
+                                        restData = null;
                                     } else {
                                         // rest的值发生了变化
                                         /**
@@ -69,16 +75,21 @@ export default class LazyProp {
                                          * * 若新增的key 要找位置插入
                                          * * 若删除key  要移除
                                          */
-                                        const restData = prop.value();
-                                        const lastKeys = so?.getData?.();
-                                        const newKeys = new Set(
-                                            Object.keys(Raw(restData))
-                                        );
+                                        let restData = prop.value();
+                                        let lastKeys:
+                                            | Set<string>
+                                            | undefined
+                                            | null = so?.getData?.();
+                                        let newKeys: Set<string> | null =
+                                            new Set(Object.keys(Raw(restData)));
                                         so?.setData?.(newKeys);
                                         newKeys.forEach((key) => {
                                             if (lastKeys?.has(key)) {
                                                 // 以前有这个值，不仅有 还是激活状态 那要改下
-                                                const indexes =
+                                                let indexes:
+                                                    | number[]
+                                                    | undefined
+                                                    | null =
                                                     this.propertyPositions.get(
                                                         key
                                                     );
@@ -92,6 +103,7 @@ export default class LazyProp {
                                                 }
                                                 // 删掉，看看最后还剩哪些 这些都要移除
                                                 lastKeys.delete(key);
+                                                indexes = null;
                                             } else {
                                                 // 不存在 是个新增的属性
                                                 // 新增的属性在最后
@@ -105,24 +117,34 @@ export default class LazyProp {
                                             this.removeTaskIndex(key, i)
                                         );
                                         lastKeys?.clear();
+                                        lastKeys = null;
+                                        newKeys = null;
+                                        restData = null;
                                     }
+                                    return () => (prop = null);
                                 },
-                                { data: new Set<string>() }
+                                {
+                                    data: new Set<string>(),
+                                    type: 'handle prop rest',
+                                }
                             )
                         );
                     }
+                    prop = null;
                 }
                 // 遍历一遍后 任务还没开始
                 this.propertyPositions.forEach((indexes, prop) => {
                     this.setTask(prop);
                 });
-                return () => o?.getData?.()?.clear(); // 清空数据
+                return () => {
+                    o?.getData?.()?.clear();
+                }; // 清空数据
             },
-            { data: new Map<number, Record<string, any>>() }
+            { data: new Map<number, Record<string, any>>(), type: 'prop main' }
         );
     }
     private removeTaskIndex(property: string, index: number) {
-        const indexes = this.propertyPositions.get(property);
+        let indexes = this.propertyPositions.get(property);
         if (indexes && indexes.length > 0) {
             // 是最后一个
             if (indexes[indexes.length - 1] === index) {
@@ -136,14 +158,14 @@ export default class LazyProp {
                 }
             } else {
                 // 不是最后一个 直接找到后删除
-                const position = indexes.indexOf(index);
-                indexes.splice(position, 1);
+                indexes.splice(indexes.indexOf(index), 1);
             }
         }
+        (indexes as any) = null;
     }
     // 加入新的索引(在已有的逻辑中，走到这里，说明原列表中肯定没有这个索引)
     private addTaskIndex(property: string, index: number) {
-        const indexes = this.propertyPositions.get(property);
+        let indexes = this.propertyPositions.get(property);
         if (indexes && indexes.length > 0) {
             if (indexes[indexes.length - 1] < index) {
                 indexes.push(index);
@@ -155,15 +177,17 @@ export default class LazyProp {
                     break;
                 }
             }
+            (indexes as any) = null;
             return false;
         } else {
             this.propertyPositions.set(property, [index]);
+            (indexes as any) = null;
             return true;
         }
     }
     // 设置任务  需要特殊处理的是children属性
     private setTask(property: string) {
-        const indexes = this.propertyPositions.get(property);
+        let indexes = this.propertyPositions.get(property);
         if (indexes && indexes.length > 0) {
             // 先停止这个任务 当然这个任务也可能是不存在的
             this.tasks.get(property)?.stop();
@@ -171,40 +195,62 @@ export default class LazyProp {
             const lastIndex = indexes[indexes.length - 1];
             // 是children
             if (property === 'children' && lastIndex < 0) {
-                this.tasks.set(
-                    property,
-                    new LazyTask((o) => {
-                        const { result, tasks } = renderChildren(
-                            this.children!
-                        );
-                        this.MyProp[property] = result;
-                        tasks.forEach((t) => o?.addSubTask(t));
-                    })
-                );
+                if (this.children!.length > 0) {
+                    this.tasks.set(
+                        property,
+                        new LazyTask(
+                            (o) => {
+                                let { result, tasks } = renderChildren(
+                                    this.children!
+                                );
+                                this.MyProp[property] = result;
+                                tasks.forEach((t) => o?.addSubTask(t));
+                                (tasks as any) = null;
+                                (result as any) = null;
+                            },
+                            {
+                                type: 'handle prop child',
+                            }
+                        )
+                    );
+                }
             } else if (this.props[lastIndex].type === 'normal') {
                 this.tasks.set(
                     property,
-                    new LazyTask(() => {
-                        this.MyProp[property] = this.props[lastIndex].value();
-                    })
+                    new LazyTask(
+                        () => {
+                            this.MyProp[property] =
+                                this.props[lastIndex].value();
+                        },
+                        {
+                            type: 'handle prop normal property',
+                        }
+                    )
                 );
             } else {
-                const restData = this.mainTask?.getData()?.get(lastIndex);
+                let restData = this.mainTask?.getData()?.get(lastIndex);
                 if (restData) {
                     this.tasks.set(
                         property,
-                        new LazyTask(() => {
-                            if (!restData.hasOwnProperty(property)) {
-                                // 这表示这个属性被删了
-                                this.removeTaskIndex(property, lastIndex);
-                            } else {
-                                this.MyProp[property] = restData[property];
+                        new LazyTask(
+                            () => {
+                                if (!restData?.hasOwnProperty(property)) {
+                                    // 这表示这个属性被删了
+                                    this.removeTaskIndex(property, lastIndex);
+                                } else {
+                                    this.MyProp[property] = restData[property];
+                                }
+                            },
+                            {
+                                type: 'handle prop rest property',
+                                onStopped: () => ((restData as any) = null),
                             }
-                        })
+                        )
                     );
                 }
             }
         }
+        (indexes as any) = null;
     }
     constructor(
         public props: IJSXProperty[],
@@ -217,6 +263,12 @@ export default class LazyProp {
         this.tasks.forEach((t) => t.stop());
         this.tasks.clear();
         this.mainTask?.stop();
+        delete (this as any).tasks;
+        delete (this as any)['propertyPositions'];
+        delete this.mainTask;
+        delete (this as any).MyProp;
+        delete (this as any).props;
+        delete (this as any).children;
     }
     getProp(): Record<string, any> {
         return new Proxy(this.MyProp, {

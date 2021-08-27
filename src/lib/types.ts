@@ -8,7 +8,6 @@ export type VoidOrVoidFunction = void | VoidFunction;
 export interface IDomPosition {
     parent?: IDomElement;
     nextSibling?: IDomElement;
-    preSibling?: IDomElement;
 }
 
 // createElement创建的一个虚拟组件
@@ -43,7 +42,7 @@ export interface IDomElement {
     // 移除元素的属性
     removeAttribute: (attr: string, value?: any) => void;
     // 移除该元素
-    remove: () => void;
+    remove: () => IDomPosition | null | undefined;
 }
 export interface ITextElement extends IDomElement {
     // 获取元素的文本内容
@@ -56,7 +55,9 @@ export type ILazyResult = Arrayable<
     Arrayable<string | number | undefined | null | VirtualElement>
 >;
 
-export type FormattedILazyResult = Arrayable<ITextElement | VirtualElement>;
+export type FormattedILazyResult =
+    | Arrayable<ITextElement | VirtualElement>
+    | Array<IForRenderResult>;
 
 export type IComponentProp<T extends Record<string, any> = {}> = {
     children?: ILazyResult;
@@ -79,4 +80,9 @@ export interface IJSXProperty {
     type: IJSXPropertyType;
     name: string;
     value: IFunctionalValue;
+}
+
+export interface IForRenderResult {
+    key: any;
+    result: FormattedILazyResult;
 }

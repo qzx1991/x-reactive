@@ -32,7 +32,7 @@ export function omit<T extends Record<string, any>, K extends keyof T>(
                     () => {
                         result[i] = data[i];
                     },
-                    { autoAppendParent: true }
+                    { autoAppendParent: true, type: 'omit' }
                 );
             }
         }
@@ -63,6 +63,7 @@ export function pick<T extends Record<string, any>, K extends keyof T>(
                     },
                     {
                         autoAppendParent: true,
+                        type: 'pick',
                     }
                 );
             }

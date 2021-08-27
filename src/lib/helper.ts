@@ -4,15 +4,18 @@ import {
     IDomElement,
     IDomPosition,
     ILazyResult,
-    ITextElement,
 } from './types';
 import VirtualElement from './VirtualElement';
-import { IFunctionalValue, ArrayableOnlyArray } from './types';
+import { IFunctionalValue, IForRenderResult } from './types';
 import LazyTask from './LazyTask';
 
 export const CHILDREN_RESULT_FLAG = Symbol('CHILDREN_RESULT_FLAG');
 export const FOR_RESULT_FLAG = Symbol('FOR_RESULT_FLAG');
 export const SPECIAL_ARRAY_LIST = [CHILDREN_RESULT_FLAG, FOR_RESULT_FLAG];
+
+export function isForResult(result: any) {
+    return result && result[FOR_RESULT_FLAG];
+}
 
 /**
  * 更新的任务集中处理，避免没必要的重复渲染
@@ -37,8 +40,6 @@ export function reWriteUpdate(task: LazyTask, onUpdate?: () => void) {
     task.forceUpdate = function () {
         if (forceUpdate.apply(this)) {
             onUpdate?.();
-            global_next_ticks.forEach((h) => h());
-            global_next_ticks = [];
             return true;
         }
         return false;
@@ -48,8 +49,12 @@ export function reWriteUpdate(task: LazyTask, onUpdate?: () => void) {
 export function runLifeCycle() {
     LazyDocument.requestAnimationFrame(() => {
         if (NEXTTICKS_SET.size > 0) {
-            NEXTTICKS_SET.forEach((t) => t.forceUpdate());
+            NEXTTICKS_SET.forEach((t) => {
+                t.forceUpdate();
+            });
             NEXTTICKS_SET.clear();
+            global_next_ticks.forEach((h) => h());
+            global_next_ticks = [];
         }
     });
 }
@@ -82,8 +87,9 @@ export function renderResult(
     result: FormattedILazyResult
 ): FormattedILazyResult {
     if (isSpecialArray(result)) {
-        (result as ArrayableOnlyArray<ITextElement | VirtualElement>).forEach(
-            (r) => renderResult(r)
+        const isFor = isForResult(result);
+        (result as Array<any>).forEach((r) =>
+            renderResult(isFor ? (r as IForRenderResult).result : r)
         );
     } else if (result instanceof VirtualElement) {
         result.render();
@@ -96,8 +102,9 @@ export function appendResults(
     target: IDomElement
 ) {
     if (isSpecialArray(result)) {
-        (result as ArrayableOnlyArray<ITextElement | VirtualElement>).forEach(
-            (i) => appendResults(i, target)
+        const isFor = isForResult(result);
+        (result as Array<FormattedILazyResult>).forEach((i) =>
+            appendResults(isFor ? (i as IForRenderResult).result : i, target)
         );
     } else if (result instanceof VirtualElement) {
         result.appendTo(target);
@@ -111,8 +118,12 @@ export function insertIntoResults(
     position: IDomPosition
 ) {
     if (isSpecialArray(result)) {
-        (result as ArrayableOnlyArray<ITextElement | VirtualElement>).forEach(
-            (i) => insertIntoResults(i, position)
+        const isFor = isForResult(result);
+        (result as Array<any>).forEach((i) =>
+            insertIntoResults(
+                isFor ? (i as IForRenderResult).result : i,
+                position
+            )
         );
     } else if (result instanceof VirtualElement) {
         result.insertInto(position);
@@ -142,28 +153,123 @@ export function diffResult(
         // 返回旧结果
         return oldResult;
     }
-    const position = unmountResult(oldResult);
+    /**
+     * 不存在For的渲染结果数组是0的情况，For组件已经预先处理了。
+     */
+
+    if (isForResult(oldResult) && isForResult(newResult)) {
+        let oldForResult = oldResult as IForRenderResult[];
+        let newForResult = newResult as IForRenderResult[];
+        let position = getPosition(oldForResult);
+        let mapOldWithKey = new Map<
+            any,
+            {
+                data: IForRenderResult;
+                index: number;
+            }
+        >();
+        // 旧数组处理
+        oldForResult.forEach((i, index) => {
+            if (
+                i.key === null ||
+                i.key === undefined ||
+                mapOldWithKey.has(i.key)
+            ) {
+                // 没有key的都直接销毁
+                unmountResult(i.result);
+            } else {
+                mapOldWithKey.set(i.key, { data: i, index });
+            }
+        });
+        let newAddResult: FormattedILazyResult[] | null = new Proxy([], {
+            get(t, k, r) {
+                if (k === FOR_RESULT_FLAG) return true;
+                return Reflect.get(t, k, r);
+            },
+        });
+        newForResult.forEach((item) => {
+            if (!mapOldWithKey.has(item.key)) {
+                renderResult(item.result);
+                return newAddResult!.push(item);
+            }
+            const s = mapOldWithKey.get(item.key)!;
+            if (newAddResult!.length > 0) {
+                const p = getPosition(s.data.result, false);
+                insertIntoResults(newAddResult!, p);
+                newAddResult = new Proxy([], {
+                    get(t, k, r) {
+                        if (k === FOR_RESULT_FLAG) return true;
+                        return Reflect.get(t, k, r);
+                    },
+                });
+            }
+            item.result = diffResult(s.data.result, item.result);
+            mapOldWithKey.delete(item.key);
+        });
+        insertIntoResults(newAddResult, position);
+        Array.from(mapOldWithKey.entries()).forEach(([key, result]) => {
+            unmountResult(result.data.result);
+        });
+        // 清除不用的数据 防止不必要的内存泄漏
+        newAddResult = null;
+        (oldForResult as any) = null;
+        (newForResult as any) = null;
+        (position as any) = null;
+        mapOldWithKey.clear();
+        (mapOldWithKey as any) = null;
+        // 接下来就是进行diff算法
+        return newResult;
+    }
+    let position = unmountResult(oldResult);
     renderResult(newResult);
     if (newResult instanceof VirtualElement) {
         newResult.insertInto(position);
     } else {
         insertIntoResults(newResult as IDomElement, position);
     }
+    (position as any) = null;
     return newResult;
 }
 
+export function getPosition(
+    result: FormattedILazyResult,
+    after = true
+): IDomPosition {
+    if (isSpecialArray(result)) {
+        const isFor = isForResult(result);
+        const r = result as FormattedILazyResult[];
+        const item = r[after ? r.length - 1 : 0];
+        return getPosition(
+            isFor ? (item as IForRenderResult).result : item,
+            after
+        );
+    } else if (result instanceof VirtualElement) {
+        return result.getPosition(after);
+    } else {
+        return after
+            ? {
+                  nextSibling: (result as IDomElement).nextSibling,
+                  parent: (result as IDomElement).parent,
+              }
+            : {
+                  nextSibling: result as IDomElement,
+                  parent: (result as IDomElement).parent,
+              };
+    }
+}
+
 export function unmountResult(result: FormattedILazyResult): IDomPosition {
+    if (!result) throw new Error('invalid result');
+    if (Array.isArray(result)) {
+        const isFor = isForResult(result);
+        return (result as Array<any>).reduce((lv, v) => {
+            return unmountResult(isFor ? (v as IForRenderResult).result : v);
+        }, {} as any);
+    }
     if (result instanceof VirtualElement) {
         return result.unmount();
     } else {
-        const dom = result as IDomElement;
-        const position: IDomPosition = {
-            parent: dom.parent,
-            preSibling: dom.preSibling,
-            nextSibling: dom.nextSibling,
-        };
-        dom.remove();
-        return position;
+        return (result as IDomElement | null)?.remove()!;
     }
 }
 
@@ -191,6 +297,7 @@ export function renderChildren(children: IFunctionalValue[]) {
                     }
                 },
                 {
+                    type: 'renderChildren',
                     onStopped: () => {
                         unmountResult(childrenResult[index]);
                     },

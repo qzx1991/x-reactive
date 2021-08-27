@@ -26,16 +26,9 @@ export type TaskChangeReason = {
 };
 
 const TARGET_TASK_RELY = new Map<any, Map<string | number, Set<LazyTask>>>();
-const TASK_TARGET_RELY = new Map<LazyTask, Map<any, Set<string | number>>>();
 
 function addRely(task: LazyTask, t: any, k: string) {
-    if (!TASK_TARGET_RELY.has(task)) {
-        TASK_TARGET_RELY.set(task, new Map());
-    }
-    if (!TASK_TARGET_RELY.get(task)?.has(t)) {
-        TASK_TARGET_RELY.get(task)?.set(t, new Set());
-    }
-    TASK_TARGET_RELY.get(task)?.get(t)?.add(k);
+    task.addRely(t, k);
     if (!TARGET_TASK_RELY.has(t)) {
         TARGET_TASK_RELY.set(t, new Map());
     }
@@ -43,21 +36,6 @@ function addRely(task: LazyTask, t: any, k: string) {
         TARGET_TASK_RELY.get(t)?.set(k, new Set());
     }
     TARGET_TASK_RELY.get(t)?.get(k)?.add(task);
-}
-function removeRely(task: LazyTask) {
-    const t = TASK_TARGET_RELY.get(task);
-    TASK_TARGET_RELY.delete(task);
-    t?.forEach((keys, target) => {
-        keys.forEach((key) => {
-            TARGET_TASK_RELY.get(target)?.get(key)?.delete(task);
-            if (TARGET_TASK_RELY.get(target)?.get(key)?.size === 0) {
-                TARGET_TASK_RELY.get(target)?.delete(key);
-            }
-            if (TARGET_TASK_RELY.get(target)?.size === 0) {
-                TARGET_TASK_RELY.delete(target);
-            }
-        });
-    });
 }
 
 onLazyable('get', (t, k, v) => {
@@ -68,32 +46,32 @@ onLazyable('get', (t, k, v) => {
 });
 
 onLazyable('set', (t, k, v, ov, isAdd) => {
-    TARGET_TASK_RELY.get(t)
-        ?.get(k as string | number)
-        ?.forEach((t) => {
-            t.addReason({
-                target: t,
-                key: k,
-                type: isAdd ? 'add' : 'set',
-                value: v,
-                oldValue: ov,
-            });
-            t.update();
+    Array.from(
+        TARGET_TASK_RELY.get(t)?.get(k as string | number) || []
+    )?.forEach((task) => {
+        task.addReason({
+            target: t,
+            key: k,
+            type: isAdd ? 'add' : 'set',
+            value: v,
+            oldValue: ov,
         });
+        task.update();
+    });
 });
 onLazyable('delete', (t, k, ov) => {
-    TARGET_TASK_RELY.get(t)
-        ?.get(k as string | number)
-        ?.forEach((t) => {
-            t.addReason({
-                target: t,
-                key: k,
-                type: 'delete',
-                value: undefined,
-                oldValue: ov,
-            });
-            t.update();
+    Array.from(
+        TARGET_TASK_RELY.get(t)?.get(k as string | number) || []
+    ).forEach((task) => {
+        task.addReason({
+            target: t,
+            key: k,
+            type: 'delete',
+            value: undefined,
+            oldValue: ov,
         });
+        task.update();
+    });
 });
 
 export default class LazyTask<T = any> {
@@ -112,20 +90,35 @@ export default class LazyTask<T = any> {
     private reasons?: TaskChangeReason[];
     private hasStopped = false;
 
+    rely = new Map<any, Set<string | number>>();
+
+    addRely(target: any, key: string | number) {
+        if (!this.rely.get(target)) {
+            this.rely.set(target, new Set());
+        }
+        this.rely.get(target)?.add(key);
+    }
+
+    removeRely() {
+        this.rely.forEach((set) => set.clear());
+        this.rely.clear();
+    }
+
     constructor(
         private handler: (
             ctx: ILazyTaskContext<T>
         ) => VoidFunction | undefined | void,
         private option: {
+            type: string;
             autoAppendParent?: boolean;
             autoRun?: boolean;
-            name?: string;
             onStopped?: () => void;
             data?: T;
             onInit?: (ins: LazyTask) => void;
             shouldUpdate?: (reasons: TaskChangeReason[]) => boolean;
-        } = {}
+        }
     ) {
+        // console.log(option.type);
         if (this.option.data) {
             this.setData(this.option.data);
         }
@@ -142,15 +135,14 @@ export default class LazyTask<T = any> {
     run() {
         const ORIGIN = TEMP_RUNNING_TASK;
         TEMP_RUNNING_TASK = this;
-        const ctx: ILazyTaskContext<T> = {
+        this.unsub = this.handler({
             time: ++this.time,
             addSubTask: this.addSubTask.bind(this),
             stop: this.stop.bind(this),
             reasons: this.reasons,
             setData: this.setData.bind(this),
             getData: this.getData.bind(this),
-        };
-        this.unsub = this.handler(ctx);
+        });
         TEMP_RUNNING_TASK = ORIGIN;
     }
     addReason(reason: TaskChangeReason) {
@@ -164,7 +156,7 @@ export default class LazyTask<T = any> {
         if (this.option.shouldUpdate && typeof this.option.shouldUpdate) {
             return this.option.shouldUpdate(this.reasons || []);
         }
-        const data = new Map<
+        let data = new Map<
             any,
             Map<string | number, { oldValue: any; newValue: any }>
         >();
@@ -172,30 +164,36 @@ export default class LazyTask<T = any> {
             if (!data.get(reason.target)) {
                 data.set(reason.target, new Map());
             }
-            const keyMap = data.get(reason.target)!;
+            let keyMap = data.get(reason.target)!;
             if (!keyMap?.has(reason.key)) {
                 keyMap?.set(reason.key, {
                     oldValue: reason.oldValue,
                     newValue: reason.value,
                 });
             } else {
-                const data = keyMap.get(reason.key)!;
-                data.newValue = reason.value;
+                keyMap.get(reason.key)!.newValue = reason.value;
             }
+            (keyMap as any) = null;
         });
         // 但凡存在新值、旧值不等的情况，都需要更新 否则不更新
-        return someOfMap(data, (k, v) =>
+        const should = someOfMap(data, (k, v) =>
             someOfMap(v, (key, d) => {
                 return d.newValue !== d.oldValue;
             })
         );
+        data.clear();
+        (data as any) = null;
+        return should;
     }
 
     forceUpdate(): boolean {
         // 如果已经停止了 那就不能更新了
         if (this.hasStopped) return false;
         // 不过条件不允许更新  那也是不能更新的
-        if (!this.shouldUpdate()) return false;
+        if (!this.shouldUpdate()) {
+            return false;
+        }
+        this.removeRely();
         this.unsub?.();
         this.run();
         delete this.reasons;
@@ -215,10 +213,18 @@ export default class LazyTask<T = any> {
         this.hasStopped = true;
         this.option.onStopped?.();
         // 移除依赖
-        removeRely(this);
+        this.removeRely();
+        delete (this as any).rely;
+        delete this.data;
+        delete this.reasons;
+        // console.log(`STOPPED: ${this.option.type}`);
     }
     addSubTask(task?: LazyTask) {
-        task && this.subTasks?.add(task);
+        if (!task) return;
+        if (!this.subTasks) {
+            this.subTasks = new Set();
+        }
+        this.subTasks?.add(task);
     }
     removeSubTask(task: LazyTask) {
         task.stop();

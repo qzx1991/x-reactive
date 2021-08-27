@@ -42,11 +42,7 @@ export type LazyableOptType = 'get' | 'set' | 'add' | 'delete';
  * @returns
  */
 export function hasTargetLazyabled<T>(value: T): boolean {
-    if (!value || typeof value !== 'object') return false;
-    const origin = getLazyableRawData(value);
-    const proto = (origin as any)?.__proto__;
-    if (!proto || !proto[LAZYABLE_FLAG]) return false;
-    return true;
+    return value && !!(value as any)[LAZYABLE_FLAG];
 }
 export function isLazyabledData(v: any): boolean {
     return v && v[LAZYABLED_FLAG];
@@ -120,7 +116,7 @@ export function Lazyable<T extends object>(
         get(t, k, r) {
             if (k === ORIGIN_TARGET_FLAG) return t;
             if (k === LAZYABLED_FLAG) return true;
-            const v = Reflect.get(t, k, r);
+            let v = Reflect.get(t, k, r);
             if (!canKeyLazyable(k, opt)) {
                 return v;
             }
@@ -131,6 +127,7 @@ export function Lazyable<T extends object>(
                       v?.__proto__ === ({} as any).__proto__) // 是一个普通的对象而非一个类
                 ? Lazyable(v) // 响应化
                 : v;
+            v = null;
             onLazyableOpt(GET_HANDLERS_MAP, t, t, k, Rv);
             onLazyableOpt(GET_HANDLERS_MAP, 'default', t, k, Rv);
             return LAZYABLE_GET_TRANSFORMERS.reduce(
@@ -140,7 +137,7 @@ export function Lazyable<T extends object>(
         },
         set(t, k, v, r) {
             const isAdd = !t.hasOwnProperty(k);
-            const oldValue = Reflect.get(t, k);
+            let oldValue = Reflect.get(t, k, r);
             // 将原生的值放进去
             const res = Reflect.set(t, k, getLazyableRawData(v), r);
             onLazyableOpt(SET_HANDLERS_MAP, t, t, k, v, oldValue, isAdd);
@@ -150,7 +147,7 @@ export function Lazyable<T extends object>(
                 t,
                 k,
                 v,
-                oldValue,
+                Array.isArray(t) && k === 'length' ? v - 1 : oldValue,
                 isAdd
             );
             if (isAdd) {
@@ -165,24 +162,26 @@ export function Lazyable<T extends object>(
                     isAdd
                 );
             }
+            oldValue = null;
             return res;
         },
         deleteProperty(t, p) {
-            const oldValue = Reflect.get(t, p);
+            let oldValue = Reflect.get(t, p);
             const res = Reflect.deleteProperty(t, p);
             onLazyableOpt(DELETE_HANDLERS_MAP, t, t, p, oldValue);
             onLazyableOpt(DELETE_HANDLERS_MAP, 'default', t, p, oldValue);
-
+            oldValue = null;
             return res;
         },
     });
     // 在原生对象中记录这个代理对象 保证所有的原生对象其实指向同一个代理对象 是否有必要 有待实践
-    new Proxy((value as any).__proto__, {
-        get(t, k, v) {
-            if (k === LAZYABLE_FLAG) return R;
-            return Reflect.get(t, k, v);
-        },
-    });
+    // new Proxy((value as any).__proto__, {
+    //     get(t, k, v) {
+    //         if (k === LAZYABLE_FLAG) return R;
+    //         return Reflect.get(t, k, v);
+    //     },
+    // });
+    // (value as any)[LAZYABLE_FLAG] = R;
     return R;
 }
 
@@ -241,17 +240,16 @@ export function onLazyable(type: LazyableOptType, t: any, h?: any) {
     } else {
         t = Raw(t);
     }
-    const map = getHandlersMapByType(type);
+    let map: Map<any, Set<LazyableSetHandlerType>> | null =
+        getHandlersMapByType(type);
     if (!map) return () => {};
     if (!map.has(t)) {
         map.set(t, new Set());
     }
     map.get(t)?.add(h);
     return () => {
-        map.get(t)?.delete(h);
-        if (map.get(t)?.size === 0) map.delete(t);
+        map?.get(t)?.delete(h);
+        if (map?.get(t)?.size === 0) map?.delete(t);
+        map = null;
     };
 }
-
-//记录哪些属性是stateable的
-export const STATE_FLAG = Symbol('state_flag');
