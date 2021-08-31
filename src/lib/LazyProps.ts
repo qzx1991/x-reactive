@@ -5,11 +5,11 @@
  * @modify date 2021-08-20 14:50:12
  * @desc [生成响应式的prop]
  */
-import { result } from 'lodash';
 import { Raw, Lazyable } from './Lazyable';
 import { IFunctionalValue, IJSXProperty } from './types';
 import LazyTask from './LazyTask';
-import { renderChildren } from './helper';
+import { RAW_CHILDREN_RESULT_FLAG } from './helper';
+
 export default class LazyProp {
     private tasks = new Map<string, LazyTask>();
 
@@ -196,23 +196,24 @@ export default class LazyProp {
             // 是children
             if (property === 'children' && lastIndex < 0) {
                 if (this.children!.length > 0) {
-                    this.tasks.set(
-                        property,
-                        new LazyTask(
-                            (o) => {
-                                let { result, tasks } = renderChildren(
-                                    this.children!
-                                );
-                                this.MyProp[property] = result;
-                                tasks.forEach((t) => o?.addSubTask(t));
-                                (tasks as any) = null;
-                                (result as any) = null;
-                            },
-                            {
-                                type: 'handle prop child',
-                            }
-                        )
-                    );
+                    // this.tasks.set(
+                    //     property,
+                    //     new LazyTask(
+                    //         (o) => {
+                    //             let { result, tasks } = renderChildren(
+                    //                 this.children!
+                    //             );
+                    //             this.MyProp[property] = result;
+                    //             tasks.forEach((t) => o?.addSubTask(t));
+                    //             (tasks as any) = null;
+                    //             (result as any) = null;
+                    //         },
+                    //         {
+                    //             type: 'handle prop child',
+                    //         }
+                    //     )
+                    // );
+                    this.MyProp['children'] = this.children;
                 }
             } else if (this.props[lastIndex].type === 'normal') {
                 this.tasks.set(

@@ -57,6 +57,7 @@ export type ILazyResult = Arrayable<
 
 export type FormattedILazyResult =
     | Arrayable<ITextElement | VirtualElement>
+    | Array<IFunctionalValue>
     | Array<IForRenderResult>;
 
 export type IComponentProp<T extends Record<string, any> = {}> = {

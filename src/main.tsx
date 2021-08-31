@@ -3,13 +3,14 @@ import { For } from './lib/Components/For';
 import { useCtx } from './lib/VirtualElement';
 import './style.less';
 import { IComponentProp } from './lib/types';
+import { CanLazyable, Ref } from './lib/Lazyable';
 
 let arrId = 0;
-
+const arr = [26, 32, 41, 82, 64];
+@CanLazyable()
 class ABCDE {
     constructor(public id: number, public value: number) {}
 }
-
 Lazyman.driveDom();
 Lazyman.render(<Test />, 'app');
 
@@ -19,13 +20,18 @@ function Test(
         state: {
             arr: randomArr(),
         },
-        lifeCycle: {},
     })
 ) {
     return (
         <div id='1'>
             <div className='btn-wrapper'>
-                <button onClick={() => ctx.state.arr.sort()}>sort</button>
+                <button
+                    onClick={() => {
+                        ctx.state.arr.sort((a, b) => a.value - b.value);
+                    }}
+                >
+                    sort
+                </button>
                 <button
                     onClick={() => {
                         ctx.state.arr.shift();
@@ -51,12 +57,13 @@ function Test(
                 >
                     push
                 </button>
-                <button>pop</button>
+                <button onClick={() => ctx.state.arr.pop()}>pop</button>
             </div>
+
             <For
                 data={ctx.state.arr}
                 key='id'
-                render={(i) => <div>{i.value}</div>}
+                render={(i) => <div onClick={() => i.value++}>{i.value}</div>}
             />
         </div>
     );

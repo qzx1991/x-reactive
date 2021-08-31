@@ -92,3 +92,26 @@ export function someOfMap<K, V>(
     }
     return false;
 }
+
+export function chunk<T>(arr: T[], size = 1) {
+    const d: T[][] = [];
+    let temp: T[] = [];
+    for (let i = 0; i < arr.length; i++) {
+        if (i % size === 0) {
+            temp = [];
+            d.push(temp);
+        }
+        temp.push(arr[i]);
+    }
+    return d;
+}
+
+export function getChunkSize(chunks: Array<any>): number {
+    return chunks.reduce((c, v) => {
+        return c + (Array.isArray(v) ? getChunkSize(v) : 1);
+    }, 0);
+}
+
+export function isNil<T>(v: T) {
+    return v === undefined || v === null;
+}

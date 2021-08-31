@@ -22,7 +22,11 @@ import {
 } from './helper';
 import LazyDocument from './Document';
 import { IDomPosition } from './types';
-import { renderChildren, renderResult } from './helper';
+import {
+    renderChildren,
+    renderResult,
+    RAW_CHILDREN_RESULT_FLAG,
+} from './helper';
 
 let TEMP_ELEMENT: VirtualElement | undefined = undefined;
 // 添加依赖注入的全局处理逻辑
@@ -117,7 +121,15 @@ export default class VirtualElement {
     private renderComponent() {
         const tag = this.tag as FunctionalComponent;
         // 对于函数组件是要处理children的 在其内部是要使用的
-        this.mainProp = new LazyProp(this.props, this.children);
+        this.mainProp = new LazyProp(
+            this.props,
+            new Proxy(this.children, {
+                get(t, k, r) {
+                    if (k === RAW_CHILDREN_RESULT_FLAG) return true;
+                    return Reflect.get(t, k, r);
+                },
+            })
+        );
         delete (this as any).props;
         delete (this as any).children;
 

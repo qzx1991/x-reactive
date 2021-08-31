@@ -125,12 +125,12 @@ class MyBaseElement implements IDomElement {
         }
     }
     remove() {
-        this.dom.remove();
         // (this.dom as any) = null;
         const position = {
             parent: this.parent,
             nextSibling: this.nextSibling,
         };
+        this.dom.remove();
         return position;
     }
     // 清空子节点

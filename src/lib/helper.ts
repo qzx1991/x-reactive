@@ -2,19 +2,28 @@ import LazyDocument from './Document';
 import {
     FormattedILazyResult,
     IDomElement,
-    IDomPosition,
     ILazyResult,
+    IForRenderResult,
 } from './types';
 import VirtualElement from './VirtualElement';
-import { IFunctionalValue, IForRenderResult } from './types';
+import { IFunctionalValue, IDomPosition } from './types';
 import LazyTask from './LazyTask';
+import { chunk, getChunkSize, isNil } from './util';
 
+export const RAW_CHILDREN_RESULT_FLAG = Symbol('RAW_CHILDREN_RESULT_FLAG');
 export const CHILDREN_RESULT_FLAG = Symbol('CHILDREN_RESULT_FLAG');
 export const FOR_RESULT_FLAG = Symbol('FOR_RESULT_FLAG');
-export const SPECIAL_ARRAY_LIST = [CHILDREN_RESULT_FLAG, FOR_RESULT_FLAG];
+export const SPECIAL_ARRAY_LIST = [
+    CHILDREN_RESULT_FLAG,
+    FOR_RESULT_FLAG,
+    RAW_CHILDREN_RESULT_FLAG,
+];
 
 export function isForResult(result: any) {
     return result && result[FOR_RESULT_FLAG];
+}
+export function isRawChildren(result: any) {
+    return result && result[RAW_CHILDREN_RESULT_FLAG];
 }
 
 /**
@@ -87,9 +96,10 @@ export function renderResult(
     result: FormattedILazyResult
 ): FormattedILazyResult {
     if (isSpecialArray(result)) {
-        const isFor = isForResult(result);
         (result as Array<any>).forEach((r) =>
-            renderResult(isFor ? (r as IForRenderResult).result : r)
+            renderResult(
+                isForResult(result) ? (r as IForRenderResult).result : r
+            )
         );
     } else if (result instanceof VirtualElement) {
         result.render();
@@ -158,67 +168,10 @@ export function diffResult(
      */
 
     if (isForResult(oldResult) && isForResult(newResult)) {
-        let oldForResult = oldResult as IForRenderResult[];
-        let newForResult = newResult as IForRenderResult[];
-        let position = getPosition(oldForResult);
-        let mapOldWithKey = new Map<
-            any,
-            {
-                data: IForRenderResult;
-                index: number;
-            }
-        >();
-        // 旧数组处理
-        oldForResult.forEach((i, index) => {
-            if (
-                i.key === null ||
-                i.key === undefined ||
-                mapOldWithKey.has(i.key)
-            ) {
-                // 没有key的都直接销毁
-                unmountResult(i.result);
-            } else {
-                mapOldWithKey.set(i.key, { data: i, index });
-            }
-        });
-        let newAddResult: FormattedILazyResult[] | null = new Proxy([], {
-            get(t, k, r) {
-                if (k === FOR_RESULT_FLAG) return true;
-                return Reflect.get(t, k, r);
-            },
-        });
-        newForResult.forEach((item) => {
-            if (!mapOldWithKey.has(item.key)) {
-                renderResult(item.result);
-                return newAddResult!.push(item);
-            }
-            const s = mapOldWithKey.get(item.key)!;
-            if (newAddResult!.length > 0) {
-                const p = getPosition(s.data.result, false);
-                insertIntoResults(newAddResult!, p);
-                newAddResult = new Proxy([], {
-                    get(t, k, r) {
-                        if (k === FOR_RESULT_FLAG) return true;
-                        return Reflect.get(t, k, r);
-                    },
-                });
-            }
-            item.result = diffResult(s.data.result, item.result);
-            mapOldWithKey.delete(item.key);
-        });
-        insertIntoResults(newAddResult, position);
-        Array.from(mapOldWithKey.entries()).forEach(([key, result]) => {
-            unmountResult(result.data.result);
-        });
-        // 清除不用的数据 防止不必要的内存泄漏
-        newAddResult = null;
-        (oldForResult as any) = null;
-        (newForResult as any) = null;
-        (position as any) = null;
-        mapOldWithKey.clear();
-        (mapOldWithKey as any) = null;
-        // 接下来就是进行diff算法
-        return newResult;
+        return diffForResult(
+            oldResult as IForRenderResult[],
+            newResult as IForRenderResult[]
+        );
     }
     let position = unmountResult(oldResult);
     renderResult(newResult);
@@ -281,18 +234,30 @@ export function renderChildren(children: IFunctionalValue[]) {
         },
     });
     const tasks: LazyTask[] = [];
-    children.forEach((child, index) =>
+    children.forEach((child, index) => {
+        if (isRawChildren(child)) {
+            const r = renderChildren(child as any);
+            childrenResult[index] = r.result;
+            r.tasks.forEach((t) => tasks.push(t));
+            return;
+        }
         tasks.push(
             new LazyTask(
                 (o) => {
                     if (o?.time === 1) {
-                        childrenResult.push(
-                            formatResult(renderResult(child()))
-                        );
+                        const r = formatResult(child());
+                        if (isRawChildren(r)) {
+                            const m = renderChildren(r as IFunctionalValue[]);
+                            m.tasks.forEach((t) => o.addSubTask(t));
+                            childrenResult[index] = m.result;
+                        } else {
+                            const a = renderResult(r);
+                            childrenResult.push(a);
+                        }
                     } else {
                         childrenResult[index] = diffResult(
                             childrenResult[index],
-                            formatResult(renderResult(child()))
+                            formatResult(child())
                         );
                     }
                 },
@@ -304,8 +269,8 @@ export function renderChildren(children: IFunctionalValue[]) {
                     onInit: (t) => reWriteUpdate(t),
                 }
             )
-        )
-    );
+        );
+    });
     return {
         tasks,
         result: childrenResult,
@@ -316,4 +281,44 @@ export function isSpecialArray<T>(data: T) {
     return (
         Array.isArray(data) && SPECIAL_ARRAY_LIST.some((s) => (data as any)[s])
     );
+}
+
+/**
+ * 算法描述：一个打乱了顺序的数组，原数组如何通过最短的步骤去得到。
+ * 1. 找到最大的不可变数组。
+ * 2. 在其空缺位置插入需要的数据
+ * @param ov
+ * @param nv
+ */
+function diffForResult(ov: IForRenderResult[], nv: IForRenderResult[]) {
+    // 先遍历旧数组 获取所有的key和下标
+    const ovKeysAndIndexes = new Map<any, number>();
+    ov.forEach((o, i) =>
+        isNil(o.key) ? unmountResult(o.result) : ovKeysAndIndexes.set(o.key, i)
+    );
+
+    let lastOIndex = -1;
+    nv.forEach((n, i) => {
+        const key = n.key;
+        const oIndex = ovKeysAndIndexes.get(key)!;
+        if (!ovKeysAndIndexes.has(key)) {
+            const position =
+                i <= 0
+                    ? getPosition(ov[0].result, false)
+                    : getPosition(nv[i - 1].result);
+            insertIntoResults(renderResult(nv[i].result), position);
+        } else {
+            n.result = diffResult(ov[oIndex].result, n.result);
+            if (oIndex > lastOIndex) {
+                lastOIndex = oIndex;
+            } else {
+                const position = getPosition(nv[i - 1].result);
+                insertIntoResults(n.result, position);
+            }
+            ovKeysAndIndexes.delete(key);
+        }
+    });
+
+    ovKeysAndIndexes.forEach((i) => unmountResult(ov[i].result));
+    return nv;
 }

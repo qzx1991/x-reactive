@@ -4,6 +4,7 @@ export const LAZYABLE_FLAG = Symbol('_$$__$$__is_lazyable');
 export const LAZYABLED_FLAG = Symbol('_$$__$$__is_lazyabled');
 /** 代理对象的原生对象属性标识 */
 export const ORIGIN_TARGET_FLAG = Symbol('_$$__$$__origin_target_flag');
+export const CAN_LAZYABLE_FLAG = Symbol('_$$__$$__can_lazyable_flag');
 
 export type LazyableGetHandlerType = (
     object: any,
@@ -122,9 +123,10 @@ export function Lazyable<T extends object>(
             }
             const Rv = hasTargetLazyabled(v)
                 ? (getLazyableRawData(v) as any)?.[LAZYABLE_FLAG] // 已经是代理对象了 获取这个对象存储的代理结果
-                : k !== '__proto__' &&
-                  (v?.__proto__ === ([] as any).__proto__ ||
-                      v?.__proto__ === ({} as any).__proto__) // 是一个普通的对象而非一个类
+                : v?.[CAN_LAZYABLE_FLAG] ||
+                  (k !== '__proto__' &&
+                      (v?.__proto__ === ([] as any).__proto__ ||
+                          v?.__proto__ === ({} as any).__proto__)) // 是一个普通的对象而非一个类
                 ? Lazyable(v) // 响应化
                 : v;
             v = null;
@@ -251,5 +253,10 @@ export function onLazyable(type: LazyableOptType, t: any, h?: any) {
         map?.get(t)?.delete(h);
         if (map?.get(t)?.size === 0) map?.delete(t);
         map = null;
+    };
+}
+export function CanLazyable() {
+    return function (t: new (...args: any[]) => any) {
+        t.prototype[CAN_LAZYABLE_FLAG] = true;
     };
 }
